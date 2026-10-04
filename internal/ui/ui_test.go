@@ -80,7 +80,7 @@ func TestUI_TabKeysSwitchView(t *testing.T) {
 		{"a", accountsView},
 		{"e", expenseView},
 		{"i", incomeView},
-		{"g", tagsView},
+		{"o", tagsView},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {

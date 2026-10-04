@@ -144,7 +144,7 @@ func (m *modelUI) tabBar() string {
 		{"a", "Accounts", accountsView},
 		{"e", "Expense", expenseView},
 		{"i", "Income", incomeView},
-		{"g", "Tags", tagsView},
+		{"o", "Tags", tagsView},
 	}
 	parts := make([]string, 0, len(tabs))
 	for _, t := range tabs {
