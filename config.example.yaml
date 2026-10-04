@@ -1,0 +1,10 @@
+ezbk:
+  api_url: https://ezbookkeeping.example.com
+  token: your-api-token
+  timezone: ""
+timeout: 10
+logging:
+  debug: false
+  file: ""
+ui:
+  full_view: false
