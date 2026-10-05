@@ -59,6 +59,7 @@ Generate one with `ezbk-tui init-config -u <url> -k <token>`. All keys can also 
 | Tabs | `a` accounts, `e` expense, `i` income, `g` tags, `t` transactions |
 | Transactions | `n` new, `N` copy selected, `T` from template, `enter` edit, `D` delete, `s` search, `/` filter, `ctrl+a` reset filters, `t` full view, `r` refresh |
 | Lists | `f` filter by item (twice: exclusive), `enter` filter and jump to transactions, `n` new, `s` sort / hide empty, `/` search list |
+| Accounts | `s` cycles sort: default → by name → by balance → by currency (default currency first) → by category |
 | Form | `ctrl+s` save, `esc` back (form is kept, `esc` in list resumes), `ctrl+n` reset, `ctrl+e` edit again, `ctrl+t` last saved date |
 
 In the Expense/Income tabs `n` pre-fills `<parent>/` from the selected category; enter

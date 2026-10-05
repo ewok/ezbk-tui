@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+
 	"ezbk-tui/internal/domain"
 	"ezbk-tui/internal/ui/prompt"
 )
@@ -137,22 +140,80 @@ func TestCategoriesModel_NewPromptPrefillsParent(t *testing.T) {
 	}
 }
 
+func accountOrder(items []list.Item) string {
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.(accountItem).account.ID)
+	}
+	return strings.Join(ids, ",")
+}
+
 func TestAccountItems(t *testing.T) {
 	api := newMockAPI()
-	items := accountItems(api.accounts, false)
+	items := accountItems(api.accounts, sortDefault, "USD")
 	if items[1].(accountItem).Title() != "Bank / EUR" {
 		t.Errorf("title = %q", items[1].(accountItem).Title())
 	}
 	if got := items[3].(accountItem).Description(); got != "-450.00 USD · Credit Card" {
 		t.Errorf("description = %q", got)
 	}
-	grouped := accountItems(api.accounts, true)
-	order := []string{}
-	for _, it := range grouped {
-		order = append(order, it.(accountItem).account.ID)
+
+	tests := []struct {
+		name    string
+		mode    accountSort
+		primary string
+		want    string
+	}{
+		{"default keeps server order", sortDefault, "USD", "10,21,22,30"},
+		{"by name", sortName, "USD", "21,22,30,10"},
+		{"by balance desc", sortBalance, "USD", "21,10,22,30"},
+		{"by currency primary first", sortCurrency, "USD", "22,30,10,21"},
+		{"by currency other primary", sortCurrency, "EUR", "21,22,30,10"},
+		{"by category", sortCategory, "USD", "10,21,22,30"},
 	}
-	if strings.Join(order, ",") != "10,21,22,30" {
-		t.Errorf("grouped order = %v", order)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := accountOrder(accountItems(api.accounts, tt.mode, tt.primary)); got != tt.want {
+				t.Errorf("order = %s, want %s", got, tt.want)
+			}
+		})
+	}
+	if accountOrder(accountItems(api.accounts, sortDefault, "")) != "10,21,22,30" {
+		t.Error("sorting must not mutate the source slice")
+	}
+}
+
+func TestAccountsModel_SortCycle(t *testing.T) {
+	api := newMockAPI()
+	m := newModelAccounts(api)
+	m, _ = updateModel(m, AccountsUpdatedMsg{})
+	m.Focus()
+
+	steps := []struct {
+		title, order, help string
+	}{
+		{"Accounts · by name", "21,22,30,10", "sort: by balance"},
+		{"Accounts · by balance", "21,10,22,30", "sort: by currency"},
+		{"Accounts · by currency", "22,30,10,21", "sort: by category"},
+		{"Accounts · by category", "10,21,22,30", "sort: default"},
+		{"Accounts", "10,21,22,30", "sort: by name"},
+	}
+	for i, s := range steps {
+		var cmd tea.Cmd
+		m, cmd = updateModel(m, keyMsg("s"))
+		if _, ok := findMsg[AccountsUpdatedMsg](runCmd(cmd)); !ok {
+			t.Fatalf("step %d: expected AccountsUpdatedMsg", i)
+		}
+		m, _ = updateModel(m, AccountsUpdatedMsg{})
+		if m.list.Title != s.title {
+			t.Errorf("step %d: title = %q, want %q", i, m.list.Title, s.title)
+		}
+		if got := accountOrder(m.list.Items()); got != s.order {
+			t.Errorf("step %d: order = %s, want %s", i, got, s.order)
+		}
+		if got := m.keymap.Sort.Help().Desc; got != s.help {
+			t.Errorf("step %d: help = %q, want %q", i, got, s.help)
+		}
 	}
 }
 

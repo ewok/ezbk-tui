@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -39,16 +40,67 @@ func (i accountItem) Description() string {
 }
 func (i accountItem) FilterValue() string { return i.account.DisplayName() }
 
+// accountSort is the ordering of the accounts panel, cycled with the Sort key.
+type accountSort int
+
+const (
+	sortDefault accountSort = iota
+	sortName
+	sortBalance
+	sortCurrency
+	sortCategory
+	sortModeCount
+)
+
+const accountsTitle = "Accounts"
+
+func (s accountSort) next() accountSort { return (s + 1) % sortModeCount }
+
+func (s accountSort) label() string {
+	switch s {
+	case sortName:
+		return "by name"
+	case sortBalance:
+		return "by balance"
+	case sortCurrency:
+		return "by currency"
+	case sortCategory:
+		return "by category"
+	default:
+		return ""
+	}
+}
+
+// helpLabel describes the mode the Sort key switches to next.
+func (s accountSort) helpLabel() string {
+	if l := s.next().label(); l != "" {
+		return "sort: " + l
+	}
+	return "sort: default"
+}
+
 type modelAccounts struct {
 	listPanel
-	api AccountsAPI
+	api      AccountsAPI
+	sortMode accountSort
 }
 
 func newModelAccounts(api AccountsAPI) modelAccounts {
-	p := newListPanel("Accounts", "account")
+	p := newListPanel(accountsTitle, "account")
 	p.withSummary = true
-	p.keymap.Sort.SetHelp("s", "group by category")
-	return modelAccounts{listPanel: p, api: api}
+	m := modelAccounts{listPanel: p, api: api}
+	m.applySortMode(sortDefault)
+	return m
+}
+
+// applySortMode sets the mode and updates the title and help text.
+func (m *modelAccounts) applySortMode(mode accountSort) {
+	m.sortMode = mode
+	m.list.Title = accountsTitle
+	if l := mode.label(); l != "" {
+		m.list.Title += " · " + l
+	}
+	m.keymap.Sort.SetHelp("s", mode.helpLabel())
 }
 
 func (m modelAccounts) Init() tea.Cmd { return nil }
@@ -59,7 +111,7 @@ func (m modelAccounts) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case AccountsUpdatedMsg:
 		return m, tea.Batch(
-			m.list.SetItems(accountItems(m.api.Accounts(), m.sorted)),
+			m.list.SetItems(accountItems(m.api.Accounts(), m.sortMode, m.api.DefaultCurrency())),
 			Cmd(DataLoadCompletedMsg{DataType: "accounts"}),
 			Cmd(SummaryUpdateMsg{}),
 		)
@@ -85,6 +137,12 @@ func (m modelAccounts) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if !m.focus {
 		return m, nil
+	}
+	// The sort mode lives on modelAccounts, so the Sort key is handled here
+	// instead of through listActions.resort (which closes over a copy of m).
+	if km, ok := msg.(tea.KeyMsg); ok && key.Matches(km, m.keymap.Sort) && !m.filterActive() {
+		m.applySortMode(m.sortMode.next())
+		return m, Cmd(AccountsUpdatedMsg{})
 	}
 	cmd := m.update(msg, listActions{
 		refresh: func() tea.Cmd { return Cmd(RefreshAccountsMsg{}) },
@@ -117,24 +175,77 @@ func (m modelAccounts) refreshCmd() tea.Cmd {
 	}
 }
 
-func accountItems(accounts []domain.Account, grouped bool) []list.Item {
-	if grouped {
+// accountItems builds list items ordered by mode. primaryCurrency goes first
+// in the currency mode.
+func accountItems(accounts []domain.Account, mode accountSort, primaryCurrency string) []list.Item {
+	if less := accountComparator(mode, primaryCurrency); less != nil {
 		accounts = slices.Clone(accounts)
-		slices.SortStableFunc(accounts, func(a, b domain.Account) int {
-			if a.IsLiability != b.IsLiability {
-				if a.IsLiability {
-					return 1
-				}
-				return -1
-			}
-			return cmp.Compare(categoryOrder(a.Category), categoryOrder(b.Category))
-		})
+		slices.SortStableFunc(accounts, less)
 	}
 	items := make([]list.Item, 0, len(accounts))
 	for _, acc := range accounts {
 		items = append(items, accountItem{account: acc})
 	}
 	return items
+}
+
+// accountComparator returns the ordering for mode, or nil for server order.
+func accountComparator(mode accountSort, primaryCurrency string) func(a, b domain.Account) int {
+	switch mode {
+	case sortName:
+		return compareAccountNames
+	case sortBalance:
+		return func(a, b domain.Account) int {
+			return cmp.Or(cmp.Compare(b.Balance, a.Balance), compareAccountNames(a, b))
+		}
+	case sortCurrency:
+		return func(a, b domain.Account) int {
+			return cmp.Or(
+				compareCurrencies(a.Currency, b.Currency, primaryCurrency),
+				compareAccountNames(a, b),
+			)
+		}
+	case sortCategory:
+		return func(a, b domain.Account) int {
+			return cmp.Or(
+				compareLiability(a, b),
+				cmp.Compare(categoryOrder(a.Category), categoryOrder(b.Category)),
+				compareAccountNames(a, b),
+			)
+		}
+	default:
+		return nil
+	}
+}
+
+func compareAccountNames(a, b domain.Account) int {
+	return cmp.Compare(strings.ToLower(a.DisplayName()), strings.ToLower(b.DisplayName()))
+}
+
+// compareCurrencies orders primary first, then the rest alphabetically.
+func compareCurrencies(a, b, primary string) int {
+	if a == b {
+		return 0
+	}
+	if a == primary {
+		return -1
+	}
+	if b == primary {
+		return 1
+	}
+	return cmp.Compare(a, b)
+}
+
+// compareLiability orders assets before liabilities.
+func compareLiability(a, b domain.Account) int {
+	switch {
+	case a.IsLiability == b.IsLiability:
+		return 0
+	case a.IsLiability:
+		return 1
+	default:
+		return -1
+	}
 }
 
 func categoryOrder(c domain.AccountCategory) int {

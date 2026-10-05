@@ -71,7 +71,7 @@ func (p *listPanel) update(msg tea.Msg, actions listActions) tea.Cmd {
 			p.list.FilterInput.Blur()
 		}
 	}
-	if p.list.FilterInput.Focused() || p.list.SettingFilter() {
+	if p.filterActive() {
 		p.list, cmd = p.list.Update(msg)
 		return cmd
 	}
@@ -110,6 +110,11 @@ func (p listPanel) View() string {
 
 func (p *listPanel) Focus() { p.focus = true }
 func (p *listPanel) Blur()  { p.focus = false }
+
+// filterActive reports whether keys currently go to the list filter.
+func (p *listPanel) filterActive() bool {
+	return p.list.FilterInput.Focused() || p.list.SettingFilter()
+}
 
 // filterInputFocused reports whether the list's filter input is active.
 func (p *listPanel) filterInputFocused() bool {
