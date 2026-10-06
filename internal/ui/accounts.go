@@ -31,12 +31,17 @@ type (
 )
 
 type accountItem struct {
-	account domain.Account
+	account   domain.Account
+	converted string // "≈… USD", only set when sorted by converted balance
 }
 
 func (i accountItem) Title() string { return i.account.DisplayName() }
 func (i accountItem) Description() string {
-	return fmt.Sprintf("%s · %s", i.account.Balance.Format(i.account.Currency), i.account.Category)
+	balance := i.account.Balance.Format(i.account.Currency)
+	if i.converted != "" {
+		balance += " (" + i.converted + ")"
+	}
+	return fmt.Sprintf("%s · %s", balance, i.account.Category)
 }
 func (i accountItem) FilterValue() string { return i.account.DisplayName() }
 
@@ -81,14 +86,15 @@ func (s accountSort) helpLabel() string {
 
 type modelAccounts struct {
 	listPanel
-	api      AccountsAPI
-	sortMode accountSort
+	api       AccountsAPI
+	sortMode  accountSort
+	converted bool
 }
 
 func newModelAccounts(api AccountsAPI) modelAccounts {
 	p := newListPanel(accountsTitle, "account")
 	p.withSummary = true
-	m := modelAccounts{listPanel: p, api: api}
+	m := modelAccounts{listPanel: p, api: api, converted: true}
 	m.applySortMode(sortDefault)
 	return m
 }
@@ -111,10 +117,13 @@ func (m modelAccounts) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshCmd()
 	case AccountsUpdatedMsg:
 		return m, tea.Batch(
-			m.list.SetItems(accountItems(m.api.Accounts(), m.sortMode, m.api.DefaultCurrency())),
+			m.setItemsCmd(),
 			Cmd(DataLoadCompletedMsg{DataType: "accounts"}),
 			Cmd(SummaryUpdateMsg{}),
 		)
+	case CurrencyModeMsg:
+		m.converted = msg.Converted
+		return m, m.setItemsCmd()
 	case NewAccountMsg:
 		api := m.api
 		return m, func() tea.Msg {
@@ -175,33 +184,67 @@ func (m modelAccounts) refreshCmd() tea.Cmd {
 	}
 }
 
-// accountItems builds list items ordered by mode. primaryCurrency goes first
-// in the currency mode.
-func accountItems(accounts []domain.Account, mode accountSort, primaryCurrency string) []list.Item {
-	if less := accountComparator(mode, primaryCurrency); less != nil {
+func (m *modelAccounts) setItemsCmd() tea.Cmd {
+	view := newCurrencyView(m.api, m.converted)
+	return m.list.SetItems(accountItems(m.api.Accounts(), m.sortMode, view))
+}
+
+// accountItems builds list items ordered by mode. The primary currency goes
+// first in the currency mode; in the balance mode with conversion on, accounts
+// are ordered by balance in the primary currency and show the converted value.
+func accountItems(accounts []domain.Account, mode accountSort, view currencyView) []list.Item {
+	if less := accountComparator(mode, view); less != nil {
 		accounts = slices.Clone(accounts)
 		slices.SortStableFunc(accounts, less)
 	}
+	showConverted := mode == sortBalance && view.convert
 	items := make([]list.Item, 0, len(accounts))
 	for _, acc := range accounts {
-		items = append(items, accountItem{account: acc})
+		item := accountItem{account: acc}
+		if showConverted && acc.Currency != view.primary {
+			if v, ok := view.rates.Convert(acc.Balance, acc.Currency, view.primary); ok {
+				item.converted = "≈" + v.Format(view.primary)
+			}
+		}
+		items = append(items, item)
 	}
 	return items
 }
 
+// compareConvertedBalance orders by balance in the primary currency (desc);
+// accounts without an exchange rate go last, ordered by native balance.
+func compareConvertedBalance(view currencyView) func(a, b domain.Account) int {
+	return func(a, b domain.Account) int {
+		va, okA := view.rates.Convert(a.Balance, a.Currency, view.primary)
+		vb, okB := view.rates.Convert(b.Balance, b.Currency, view.primary)
+		switch {
+		case okA && !okB:
+			return -1
+		case !okA && okB:
+			return 1
+		case !okA && !okB:
+			va, vb = a.Balance, b.Balance
+		}
+		return cmp.Or(cmp.Compare(vb, va), compareAccountNames(a, b))
+	}
+}
+
 // accountComparator returns the ordering for mode, or nil for server order.
-func accountComparator(mode accountSort, primaryCurrency string) func(a, b domain.Account) int {
+func accountComparator(mode accountSort, view currencyView) func(a, b domain.Account) int {
 	switch mode {
 	case sortName:
 		return compareAccountNames
 	case sortBalance:
+		if view.convert {
+			return compareConvertedBalance(view)
+		}
 		return func(a, b domain.Account) int {
 			return cmp.Or(cmp.Compare(b.Balance, a.Balance), compareAccountNames(a, b))
 		}
 	case sortCurrency:
 		return func(a, b domain.Account) int {
 			return cmp.Or(
-				compareCurrencies(a.Currency, b.Currency, primaryCurrency),
+				compareCurrencies(a.Currency, b.Currency, view.primary),
 				compareAccountNames(a, b),
 			)
 		}

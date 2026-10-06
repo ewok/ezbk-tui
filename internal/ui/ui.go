@@ -207,6 +207,7 @@ func (m modelUI) handleGlobalKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 func (m *modelUI) setConvertTotals(v bool) {
 	m.convertTotals = v
 	m.summary.converted = v
+	m.accounts.converted = v
 	m.expense.converted = v
 	m.income.converted = v
 }

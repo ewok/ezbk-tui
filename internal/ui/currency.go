@@ -67,6 +67,32 @@ func formatTotal(a domain.Amounts, api CurrencyAPI, convert bool) string {
 	return s
 }
 
+// currencyView carries what list builders need to show amounts in the
+// default currency. With convert false, amounts stay in native currencies.
+type currencyView struct {
+	primary string
+	rates   domain.ExchangeRates
+	convert bool
+}
+
+func newCurrencyView(api CurrencyAPI, convert bool) currencyView {
+	return currencyView{primary: api.DefaultCurrency(), rates: api.ExchangeRates(), convert: convert}
+}
+
+// DefaultCurrency and ExchangeRates let currencyView act as a CurrencyAPI.
+func (v currencyView) DefaultCurrency() string             { return v.primary }
+func (v currencyView) ExchangeRates() domain.ExchangeRates { return v.rates }
+
+// sortKey returns the value used to order multi-currency totals: the
+// converted sum in converted mode, otherwise the primary-currency part.
+func (v currencyView) sortKey(a domain.Amounts) domain.Money {
+	if !v.convert {
+		return a.Get(v.primary)
+	}
+	total, _ := a.ConvertTo(v.primary, v.rates)
+	return total
+}
+
 // missingCurrencies returns the sorted union of unconverted currencies.
 func missingCurrencies(parts ...domain.Amounts) []string {
 	out := []string{}

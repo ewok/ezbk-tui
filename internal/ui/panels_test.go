@@ -88,7 +88,7 @@ func TestCreateCategoryPath(t *testing.T) {
 
 func TestCategoryItems(t *testing.T) {
 	api := newMockAPI()
-	items := categoryItems(api, domain.CategoryExpense, false)
+	items := categoryItems(api, domain.CategoryExpense, false, false)
 	if len(items) != 4 {
 		t.Fatalf("tree items = %d", len(items))
 	}
@@ -99,7 +99,7 @@ func TestCategoryItems(t *testing.T) {
 		t.Errorf("primary description = %q", got)
 	}
 
-	sorted := categoryItems(api, domain.CategoryExpense, true)
+	sorted := categoryItems(api, domain.CategoryExpense, true, false)
 	if len(sorted) != 2 {
 		t.Fatalf("sorted items = %d", len(sorted))
 	}
@@ -108,9 +108,57 @@ func TestCategoryItems(t *testing.T) {
 		t.Errorf("sorted first = %q", first.Title())
 	}
 
-	income := categoryItems(api, domain.CategoryIncome, false)
+	income := categoryItems(api, domain.CategoryIncome, false, false)
 	if got := income[0].(categoryItem).Description(); got != "Earned: 3000.00 EUR" {
 		t.Errorf("income description = %q", got)
+	}
+}
+
+func categoryIDs(items []list.Item) string {
+	ids := []string{}
+	for _, it := range items {
+		ids = append(ids, it.(categoryItem).category.ID)
+	}
+	return strings.Join(ids, ",")
+}
+
+func TestCategoryItems_Converted(t *testing.T) {
+	api := newMockAPI()
+	income := categoryItems(api, domain.CategoryIncome, false, true)
+	if got := income[0].(categoryItem).Description(); got != "Earned: 3750.00 USD" {
+		t.Errorf("income description = %q", got)
+	}
+
+	// 50 EUR = 62.50 USD beats 60 USD only after conversion.
+	api.totals["200"] = domain.Amounts{"EUR": 5000}
+	api.totals["201"] = domain.Amounts{"EUR": 5000}
+	tests := []struct {
+		name      string
+		convert   bool
+		wantOrder string
+		wantDesc  string
+	}{
+		{"converted", true, "201,211", "Spent: 62.50 USD"},
+		{"breakdown", false, "211,201", "Spent: 50.00 EUR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := categoryItems(api, domain.CategoryExpense, true, tt.convert)
+			if got := categoryIDs(items); got != tt.wantOrder {
+				t.Errorf("order = %s, want %s", got, tt.wantOrder)
+			}
+			for _, it := range items {
+				if ci := it.(categoryItem); ci.category.ID == "201" && ci.Description() != tt.wantDesc {
+					t.Errorf("description = %q, want %q", ci.Description(), tt.wantDesc)
+				}
+			}
+		})
+	}
+
+	api.totals["201"] = domain.Amounts{"USD": 100, "KGS": 500}
+	items := categoryItems(api, domain.CategoryExpense, false, true)
+	if got := items[1].(categoryItem).Description(); got != "    Spent: ~1.00 USD, 5.00 KGS" {
+		t.Errorf("missing rate description = %q", got)
 	}
 }
 
@@ -181,7 +229,7 @@ func accountOrder(items []list.Item) string {
 
 func TestAccountItems(t *testing.T) {
 	api := newMockAPI()
-	items := accountItems(api.accounts, sortDefault, "USD")
+	items := accountItems(api.accounts, sortDefault, currencyView{primary: "USD"})
 	if items[1].(accountItem).Title() != "Bank / EUR" {
 		t.Errorf("title = %q", items[1].(accountItem).Title())
 	}
@@ -204,13 +252,72 @@ func TestAccountItems(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := accountOrder(accountItems(api.accounts, tt.mode, tt.primary)); got != tt.want {
+			if got := accountOrder(accountItems(api.accounts, tt.mode, currencyView{primary: tt.primary})); got != tt.want {
 				t.Errorf("order = %s, want %s", got, tt.want)
 			}
 		})
 	}
-	if accountOrder(accountItems(api.accounts, sortDefault, "")) != "10,21,22,30" {
+	if accountOrder(accountItems(api.accounts, sortDefault, currencyView{})) != "10,21,22,30" {
 		t.Error("sorting must not mutate the source slice")
+	}
+}
+
+func TestAccountItems_ConvertedBalance(t *testing.T) {
+	api := newMockAPI()
+	accounts := []domain.Account{
+		{ID: "1", Name: "Dollars", Currency: "USD", Balance: 12000},
+		{ID: "2", Name: "Euros", Currency: "EUR", Balance: 10000}, // 125.00 USD
+		{ID: "3", Name: "Soms", Currency: "KGS", Balance: 999999}, // no rate
+	}
+	tests := []struct {
+		name     string
+		mode     accountSort
+		convert  bool
+		order    string
+		euroDesc string
+	}{
+		{"converted balance", sortBalance, true, "2,1,3", "100.00 EUR (≈125.00 USD) · Category 0"},
+		{"native balance", sortBalance, false, "3,1,2", "100.00 EUR · Category 0"},
+		{"other mode has no suffix", sortName, true, "1,2,3", "100.00 EUR · Category 0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := accountItems(accounts, tt.mode, newCurrencyView(api, tt.convert))
+			if got := accountOrder(items); got != tt.order {
+				t.Errorf("order = %s, want %s", got, tt.order)
+			}
+			for _, it := range items {
+				ai := it.(accountItem)
+				switch ai.account.ID {
+				case "2":
+					if ai.Description() != tt.euroDesc {
+						t.Errorf("euro description = %q, want %q", ai.Description(), tt.euroDesc)
+					}
+				default:
+					if ai.converted != "" {
+						t.Errorf("account %s must not show a converted value", ai.account.ID)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestAccountsModel_CurrencyModeResorts(t *testing.T) {
+	api := newMockAPI()
+	api.accounts = []domain.Account{
+		{ID: "1", Name: "Dollars", Currency: "USD", Balance: 12000},
+		{ID: "2", Name: "Euros", Currency: "EUR", Balance: 10000},
+	}
+	m := newModelAccounts(api)
+	m.applySortMode(sortBalance)
+	m, _ = updateModel(m, AccountsUpdatedMsg{})
+	if got := accountOrder(m.list.Items()); got != "2,1" {
+		t.Errorf("converted order = %s", got)
+	}
+	m, _ = updateModel(m, CurrencyModeMsg{Converted: false})
+	if got := accountOrder(m.list.Items()); got != "1,2" {
+		t.Errorf("native order = %s", got)
 	}
 }
 

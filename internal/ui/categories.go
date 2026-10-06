@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 package ui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -32,7 +33,7 @@ type (
 type categoryItem struct {
 	category domain.Category
 	total    domain.Amounts
-	currency string
+	view     currencyView
 	label    string
 	flat     bool
 }
@@ -55,7 +56,7 @@ func (i categoryItem) Description() string {
 	if i.total.IsZero() {
 		return prefix + "No transactions"
 	}
-	return prefix + i.label + ": " + i.total.Format(i.currency)
+	return prefix + i.label + ": " + formatTotal(i.total, i.view, i.view.convert)
 }
 
 func (i categoryItem) FilterValue() string { return i.category.DisplayName() }
@@ -193,7 +194,7 @@ func createCategoryPath(api CategoriesAPI, msg NewCategoryMsg) error {
 }
 
 func (m *modelCategories) updateItemsCmd() tea.Cmd {
-	items := categoryItems(m.api, m.catType, m.sorted)
+	items := categoryItems(m.api, m.catType, m.sorted, m.converted)
 	label, total := m.totalLabel()
 	items = slices.Insert(items, 0, list.Item(simpleItem{
 		title: "Total",
@@ -209,8 +210,10 @@ func (m *modelCategories) totalLabel() (string, domain.Amounts) {
 	return "Spent", m.api.PeriodExpense()
 }
 
-func categoryItems(api CategoriesAPI, t domain.CategoryType, sorted bool) []list.Item {
-	currency := api.DefaultCurrency()
+// categoryItems builds the category rows; with convert, totals are shown and
+// sorted in the default currency.
+func categoryItems(api CategoriesAPI, t domain.CategoryType, sorted, convert bool) []list.Item {
+	view := newCurrencyView(api, convert)
 	label := "Spent"
 	if t == domain.CategoryIncome {
 		label = "Earned"
@@ -221,11 +224,11 @@ func categoryItems(api CategoriesAPI, t domain.CategoryType, sorted bool) []list
 		if sorted && (c.IsPrimary() || total.IsZero()) {
 			continue
 		}
-		items = append(items, categoryItem{category: c, total: total, currency: currency, label: label, flat: sorted})
+		items = append(items, categoryItem{category: c, total: total, view: view, label: label, flat: sorted})
 	}
 	if sorted {
 		slices.SortStableFunc(items, func(a, b list.Item) int {
-			return int(b.(categoryItem).total.Get(currency) - a.(categoryItem).total.Get(currency))
+			return cmp.Compare(view.sortKey(b.(categoryItem).total), view.sortKey(a.(categoryItem).total))
 		})
 	}
 	return items

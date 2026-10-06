@@ -12,13 +12,16 @@ tags and transaction templates.
   and all-time keyword search
 - Create / edit / delete expense, income and transfer transactions (cross-currency transfers
   with a separate destination amount); read-only transactions are protected
-- Accounts tab: balances of all accounts and sub-accounts, net worth per currency, create accounts
-- Expense and Income tabs: category tree with monthly totals, create categories and sub-categories
+- Accounts tab: balances of all accounts and sub-accounts, create accounts; the by-balance sort
+  orders by the balance in the default currency and shows the converted value
+- Expense and Income tabs: category tree with monthly totals in the default currency, create
+  categories and sub-categories
 - Tags tab: monthly spent/earned per tag, create tags, tag picker in the form
 - Quick-add from ezBookkeeping transaction templates
 - Summary panel: net worth, income, expense and balance converted to the default currency with the
-  server's latest exchange rates (`c` toggles a per-currency breakdown; currencies without a rate
-  are always listed separately and the converted total is marked with `~`)
+  server's latest exchange rates. `c` switches this, the category totals and the accounts balance
+  sort to a per-currency breakdown. Currencies without a rate are always listed separately and the
+  converted total is marked with `~`
 
 ## Requirements
 
