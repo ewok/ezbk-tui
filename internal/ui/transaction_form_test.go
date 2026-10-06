@@ -6,6 +6,7 @@ package ui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -220,6 +221,51 @@ func TestForm_SaveCmdCallsApi(t *testing.T) {
 	res, _ = findMsg[TransactionSaveResultMsg](runCmd(m.saveCmd()))
 	if !res.Updated || len(api.updated) != 1 || api.updated[0].ID != "1" {
 		t.Fatalf("update result = %+v", res)
+	}
+}
+
+func TestForm_EditTags(t *testing.T) {
+	hidden := domain.Tag{ID: "99", Name: "hidden"}
+	tests := []struct {
+		name   string
+		tags   []domain.Tag
+		change func(d *formData)
+		want   []string
+	}{
+		{"keeps existing", []domain.Tag{tagTrip}, func(*formData) {}, []string{"7"}},
+		{"adds", []domain.Tag{tagTrip}, func(d *formData) { d.tagIDs = append(d.tagIDs, "8") }, []string{"7", "8"}},
+		{"removes all", []domain.Tag{tagTrip}, func(d *formData) { d.tagIDs = []string{} }, []string{}},
+		{"preserves hidden", []domain.Tag{hidden, tagTrip}, func(d *formData) { d.tagIDs = []string{} }, []string{"99"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api := newMockAPI()
+			tx := api.txs[0]
+			tx.Tags = tt.tags
+			m := newFormWith(t, api, tx, false)
+			if slices.Contains(m.data.tagIDs, hidden.ID) {
+				t.Fatal("hidden tag must not be bound to the multi-select")
+			}
+			tt.change(m.data)
+			m.UpdateForm() // redraws must not lose or duplicate tags
+			req, err := m.buildRequest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(req.TagIDs, tt.want) {
+				t.Errorf("TagIDs = %v, want %v", req.TagIDs, tt.want)
+			}
+		})
+	}
+}
+
+func TestForm_TagsFieldShowsSelection(t *testing.T) {
+	api := newMockAPI()
+	tx := api.txs[0]
+	tx.Tags = []domain.Tag{tagWork}
+	m := newFormWith(t, api, tx, false)
+	if view := m.form.View(); !strings.Contains(view, "✓ work") {
+		t.Errorf("selected tag not rendered as checked:\n%s", view)
 	}
 }
 

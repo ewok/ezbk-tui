@@ -7,6 +7,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -20,7 +21,10 @@ import (
 	"ezbk-tui/internal/ui/prompt"
 )
 
-const maxCommentLength = 255
+const (
+	maxCommentLength = 255
+	maxTags          = 10 // ezBookkeeping limit per transaction
+)
 
 type (
 	RedrawFormMsg          struct{}
@@ -49,6 +53,7 @@ type formData struct {
 	amount      string
 	destAmount  string
 	tagIDs      []string
+	keptTagIDs  []string // tags not offered by the form (e.g. hidden); preserved on save
 	comment     string
 	year        string
 	month       string
@@ -232,6 +237,32 @@ func (d *formData) dateString() string {
 	return d.year + "-" + d.month + "-" + d.day
 }
 
+// allTagIDs returns the tags selected in the form plus the preserved ones.
+func (d *formData) allTagIDs() []string {
+	out := make([]string, 0, len(d.tagIDs)+len(d.keptTagIDs))
+	out = append(out, d.keptTagIDs...)
+	for _, id := range d.tagIDs {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// splitTagIDs moves tags that the form cannot show into keptTagIDs, so that
+// the multi-select (which only reports offered options) does not drop them.
+func (d *formData) splitTagIDs(offered map[string]bool) {
+	var shown, kept []string
+	for _, id := range d.allTagIDs() {
+		if offered[id] {
+			shown = append(shown, id)
+		} else {
+			kept = append(kept, id)
+		}
+	}
+	d.tagIDs, d.keptTagIDs = shown, kept
+}
+
 func timeOfDay(t time.Time) time.Duration {
 	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute + time.Duration(t.Second())*time.Second
 }
@@ -270,7 +301,7 @@ func (m *modelTransaction) buildRequest() (domain.TransactionRequest, error) {
 		CategoryID:      d.categoryID,
 		SourceAccountID: d.sourceID,
 		SourceAmount:    amount,
-		TagIDs:          append([]string{}, d.tagIDs...),
+		TagIDs:          d.allTagIDs(),
 		Comment:         d.comment,
 	}
 	if d.txType == domain.TxTransfer {

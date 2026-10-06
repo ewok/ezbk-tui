@@ -21,6 +21,7 @@ type formOptions struct {
 	accountByID map[string]domain.Account
 	categories  map[domain.CategoryType][]huh.Option[string]
 	tags        []huh.Option[string]
+	tagIDs      map[string]bool
 }
 
 func (m *modelTransaction) buildFormOptions() *formOptions {
@@ -28,6 +29,7 @@ func (m *modelTransaction) buildFormOptions() *formOptions {
 		accounts:    m.api.Accounts(),
 		accountByID: map[string]domain.Account{},
 		categories:  map[domain.CategoryType][]huh.Option[string]{},
+		tagIDs:      map[string]bool{},
 	}
 	for _, acc := range opts.accounts {
 		opts.accountByID[acc.ID] = acc
@@ -41,6 +43,7 @@ func (m *modelTransaction) buildFormOptions() *formOptions {
 	}
 	for _, tag := range m.api.Tags() {
 		opts.tags = append(opts.tags, huh.NewOption(tag.Name, tag.ID))
+		opts.tagIDs[tag.ID] = true
 	}
 	return opts
 }
@@ -77,6 +80,7 @@ func (m *modelTransaction) UpdateForm() {
 	if d.sourceID == "" && len(m.opts.accounts) > 0 {
 		d.sourceID = m.opts.accounts[0].ID
 	}
+	d.splitTagIDs(m.opts.tagIDs)
 	m.form = huh.NewForm(
 		m.mainGroup(),
 		m.amountGroup(),
@@ -178,14 +182,17 @@ func (m *modelTransaction) detailsGroup() *huh.Group {
 			WithWidth(30),
 	}
 	if len(m.opts.tags) > 0 {
+		// Value must be bound before Options: huh only scrolls to the
+		// selected options when they are known at Options() time.
 		fields = append(fields, huh.NewMultiSelect[string]().
 			Title("Tags").
-			Options(m.opts.tags...).
+			Description("space/x toggle · enter next").
 			Value(&d.tagIDs).
-			Limit(10).
-			Height(6))
+			Options(m.opts.tags...).
+			Limit(max(1, maxTags-len(d.keptTagIDs))).
+			Height(7))
 	} else {
-		fields = append(fields, huh.NewNote().Title("Tags").Description("No tags (create in Tags tab: g, n)"))
+		fields = append(fields, huh.NewNote().Title("Tags").Description("No tags (create in Tags tab: o, n)"))
 	}
 	return huh.NewGroup(fields...)
 }
