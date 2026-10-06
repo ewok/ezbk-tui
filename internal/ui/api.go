@@ -18,6 +18,7 @@ type PeriodAPI interface {
 
 type CurrencyAPI interface {
 	DefaultCurrency() string
+	ExchangeRates() domain.ExchangeRates
 }
 
 type AccountsAPI interface {

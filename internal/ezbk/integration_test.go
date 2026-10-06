@@ -39,6 +39,7 @@ func TestIntegration_ReadAll(t *testing.T) {
 		{"tags", api.UpdateTags},
 		{"templates", api.UpdateTemplates},
 		{"period stats", api.UpdatePeriodStats},
+		{"exchange rates", api.UpdateExchangeRates},
 	}
 	for _, s := range steps {
 		t.Run(s.name, func(t *testing.T) {
@@ -54,6 +55,13 @@ func TestIntegration_ReadAll(t *testing.T) {
 	t.Logf("user=%s currency=%s accounts=%d expenseCats=%d tags=%d templates=%d tx(month)=%d",
 		api.Username(), api.DefaultCurrency(), len(api.Accounts()),
 		len(api.Categories(domain.CategoryExpense)), len(api.Tags()), len(api.Templates()), len(txs))
+
+	assets, liabilities := api.NetWorth()
+	rates := api.ExchangeRates()
+	a, aLeft := assets.ConvertTo(api.DefaultCurrency(), rates)
+	l, lLeft := liabilities.ConvertTo(api.DefaultCurrency(), rates)
+	t.Logf("rates base=%s; net worth %s (unconverted: %v %v)",
+		rates.Base, (a + l).Format(api.DefaultCurrency()), aLeft, lLeft)
 }
 
 func TestIntegration_TransactionLifecycle(t *testing.T) {

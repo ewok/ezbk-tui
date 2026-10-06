@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"ezbk-tui/internal/domain"
 )
 
@@ -32,7 +34,11 @@ func newPeriodStats() PeriodStats {
 }
 
 // UpdatePeriodStats reloads the period's transactions and recomputes totals.
+// Exchange rates are refreshed too; a rate failure only logs a warning.
 func (a *Api) UpdatePeriodStats() error {
+	if err := a.UpdateExchangeRates(); err != nil {
+		zap.L().Warn("keeping cached exchange rates", zap.Error(err))
+	}
 	params := url.Values{
 		"start_time": {strconv.FormatInt(a.PeriodStart().Unix(), 10)},
 		"end_time":   {strconv.FormatInt(a.PeriodEnd().Unix(), 10)},

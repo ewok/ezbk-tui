@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"ezbk-tui/internal/domain"
 )
 
@@ -36,6 +38,7 @@ type Api struct {
 	tagByID        map[string]domain.Tag
 	templates      []*templateInfo
 	stats          PeriodStats
+	rates          domain.ExchangeRates
 }
 
 // NewApi connects to ezBookkeeping, verifies the token and sets the period to the current month.
@@ -62,6 +65,10 @@ func newApiWithClient(client *Client, timeout int) (*Api, error) {
 
 	if err := a.UpdateProfile(); err != nil {
 		return nil, explainAuthError(err, client.token, client.apiTokensEnabled())
+	}
+	// Load rates up front so the first summary render can convert totals.
+	if err := a.UpdateExchangeRates(); err != nil {
+		zap.L().Warn("exchange rates not loaded at startup", zap.Error(err))
 	}
 	return a, nil
 }

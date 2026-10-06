@@ -10,9 +10,10 @@ import (
 )
 
 type UIKeyMap struct {
-	Quit          key.Binding
-	ShowShortHelp key.Binding
-	PeriodPicker  key.Binding
+	Quit           key.Binding
+	ShowShortHelp  key.Binding
+	PeriodPicker   key.Binding
+	ToggleCurrency key.Binding
 }
 
 // ViewKeyMap holds the tab switching keys shared by all panels.
@@ -76,9 +77,10 @@ func binding(keys, help string, k ...string) key.Binding {
 
 func DefaultUIKeyMap() UIKeyMap {
 	return UIKeyMap{
-		Quit:          binding("ctrl+c", "quit"),
-		ShowShortHelp: binding("?", "toggle help"),
-		PeriodPicker:  binding("p", "period picker"),
+		Quit:           binding("ctrl+c", "quit"),
+		ShowShortHelp:  binding("?", "toggle help"),
+		PeriodPicker:   binding("p", "period picker"),
+		ToggleCurrency: binding("c", "converted / per-currency totals"),
 	}
 }
 
@@ -149,11 +151,11 @@ func DefaultTemplatesKeyMap() TemplatesKeyMap {
 }
 
 func (k UIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.ShowShortHelp, k.Quit, k.PeriodPicker}
+	return []key.Binding{k.ShowShortHelp, k.Quit, k.PeriodPicker, k.ToggleCurrency}
 }
 
 func (k UIKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.PeriodPicker}}
+	return [][]key.Binding{{k.PeriodPicker, k.ToggleCurrency}}
 }
 
 func (k ViewKeyMap) bindings() []key.Binding {

@@ -62,10 +62,11 @@ func (i categoryItem) FilterValue() string { return i.category.DisplayName() }
 
 type modelCategories struct {
 	listPanel
-	api      CategoriesAPI
-	catType  domain.CategoryType
-	view     state
-	isLoader bool
+	api       CategoriesAPI
+	catType   domain.CategoryType
+	view      state
+	isLoader  bool
+	converted bool
 }
 
 func newModelCategories(api CategoriesAPI, t domain.CategoryType, view state, isLoader bool) modelCategories {
@@ -74,7 +75,7 @@ func newModelCategories(api CategoriesAPI, t domain.CategoryType, view state, is
 		title = "Income categories"
 	}
 	p := newListPanel(title, "category")
-	return modelCategories{listPanel: p, api: api, catType: t, view: view, isLoader: isLoader}
+	return modelCategories{listPanel: p, api: api, catType: t, view: view, isLoader: isLoader, converted: true}
 }
 
 func (m modelCategories) Init() tea.Cmd { return nil }
@@ -92,6 +93,9 @@ func (m modelCategories) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, Cmd(DataLoadCompletedMsg{DataType: "categories"}))
 		}
 		return m, tea.Batch(cmds...)
+	case CurrencyModeMsg:
+		m.converted = msg.Converted
+		return m, m.updateItemsCmd()
 	case NewCategoryMsg:
 		if msg.Type != m.catType {
 			return m, nil
@@ -193,7 +197,7 @@ func (m *modelCategories) updateItemsCmd() tea.Cmd {
 	label, total := m.totalLabel()
 	items = slices.Insert(items, 0, list.Item(simpleItem{
 		title: "Total",
-		desc:  label + ": " + total.Format(m.api.DefaultCurrency()),
+		desc:  label + ": " + formatTotal(total, m.api, m.converted),
 	}))
 	return m.list.SetItems(items)
 }

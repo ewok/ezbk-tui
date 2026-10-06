@@ -16,7 +16,9 @@ tags and transaction templates.
 - Expense and Income tabs: category tree with monthly totals, create categories and sub-categories
 - Tags tab: monthly spent/earned per tag, create tags, tag picker in the form
 - Quick-add from ezBookkeeping transaction templates
-- Summary panel: net worth, income, expense and balance per currency
+- Summary panel: net worth, income, expense and balance converted to the default currency with the
+  server's latest exchange rates (`c` toggles a per-currency breakdown; currencies without a rate
+  are always listed separately and the converted total is marked with `~`)
 
 ## Requirements
 
@@ -46,6 +48,9 @@ timeout: 10
 logging:
   debug: false
   file: /tmp/ezbk-tui.log
+ui:
+  full_view: false
+  convert_totals: true                         # totals in the default currency (toggle with c)
 ```
 
 Generate one with `ezbk-tui init-config -u <url> -k <token>`. All keys can also be passed as flags
@@ -55,7 +60,7 @@ Generate one with `ezbk-tui init-config -u <url> -k <token>`. All keys can also 
 
 | Where | Keys |
 |---|---|
-| Global | `p` period picker, `?` help, `ctrl+c` quit |
+| Global | `p` period picker, `c` converted / per-currency totals, `?` help, `ctrl+c` quit |
 | Tabs | `a` accounts, `e` expense, `i` income, `g` tags, `t` transactions |
 | Transactions | `n` new, `N` copy selected, `T` from template, `enter` edit, `D` delete, `s` search, `/` filter, `ctrl+a` reset filters, `t` full view, `r` refresh |
 | Lists | `f` filter by item (twice: exclusive), `enter` filter and jump to transactions, `n` new, `s` sort / hide empty, `/` search list |

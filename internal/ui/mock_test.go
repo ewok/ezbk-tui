@@ -43,6 +43,7 @@ type mockAPI struct {
 	totals     map[string]domain.Amounts
 	income     domain.Amounts
 	expense    domain.Amounts
+	rates      domain.ExchangeRates
 
 	created      []domain.TransactionRequest
 	updated      []domain.TransactionRequest
@@ -57,7 +58,10 @@ type mockAPI struct {
 
 func newMockAPI() *mockAPI {
 	loc := time.FixedZone("CEST", 2*3600)
+	// 1 USD = 0.8 EUR, i.e. 1 EUR = 1.25 USD.
+	rates, _ := domain.NewExchangeRates("USD", time.Time{}, map[string]string{"USD": "1", "EUR": "0.8"})
 	return &mockAPI{
+		rates:      rates,
 		loc:        loc,
 		start:      time.Date(2026, 10, 1, 0, 0, 0, 0, loc),
 		accounts:   []domain.Account{accWallet, accEUR, accUSD2, accVisa},
@@ -84,7 +88,10 @@ func (m *mockAPI) PeriodEnd() time.Time   { return m.start.AddDate(0, 1, 0).Add(
 func (m *mockAPI) SetPeriod(y int, mo time.Month) {
 	m.start = time.Date(y, mo, 1, 0, 0, 0, 0, m.loc)
 }
-func (m *mockAPI) DefaultCurrency() string    { return "USD" }
+func (m *mockAPI) DefaultCurrency() string { return "USD" }
+func (m *mockAPI) ExchangeRates() domain.ExchangeRates {
+	return m.rates
+}
 func (m *mockAPI) DefaultAccountID() string   { return "10" }
 func (m *mockAPI) Location() *time.Location   { return m.loc }
 func (m *mockAPI) TimeoutSeconds() int        { return 1 }

@@ -68,7 +68,8 @@ type modelUI struct {
 	Width  int
 	layout *LayoutConfig
 
-	loadStatus map[string]bool
+	loadStatus    map[string]bool
+	convertTotals bool
 }
 
 // Show runs the TUI until the user quits.
@@ -104,6 +105,7 @@ func NewModelUI(api UIAPI) modelUI {
 		layout:       NewDefaultLayout().WithFullTransactionView(viper.GetBool("ui.full_view")),
 		loadStatus:   newLoadStatus(),
 	}
+	m.setConvertTotals(convertTotalsSetting())
 	m.help.Styles.FullKey = m.styles.HelpFullKey
 	m.help.Styles.ShortKey = m.styles.HelpShortKey
 	return m
@@ -192,8 +194,21 @@ func (m modelUI) handleGlobalKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keymap.PeriodPicker) && !m.isAnyInputFocused():
 		start := m.api.PeriodStart()
 		return true, m, period.Open(start.Year(), start.Month())
+	case key.Matches(msg, m.keymap.ToggleCurrency) && !m.isAnyInputFocused() && !m.periodPicker.Focused():
+		m.setConvertTotals(!m.convertTotals)
+		viper.Set(convertTotalsKey, m.convertTotals)
+		return true, m, Cmd(CurrencyModeMsg{Converted: m.convertTotals})
 	}
 	return false, m, nil
+}
+
+// setConvertTotals sets the initial mode on the root and the panels; later
+// changes reach the panels through CurrencyModeMsg.
+func (m *modelUI) setConvertTotals(v bool) {
+	m.convertTotals = v
+	m.summary.converted = v
+	m.expense.converted = v
+	m.income.converted = v
 }
 
 // lazyLoad waits for base data (needed to resolve names) before loading transactions.

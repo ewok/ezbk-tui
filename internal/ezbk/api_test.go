@@ -44,6 +44,9 @@ const (
 		{"id":"3","type":4,"categoryId":"301","time":1759492800,"utcOffset":120,"sourceAccountId":"10","destinationAccountId":"21","sourceAmount":1000,"destinationAmount":900,"tagIds":[],"editable":false},
 		{"id":"4","type":3,"categoryId":"201","time":1759579200,"utcOffset":120,"sourceAccountId":"40","sourceAmount":250,"tagIds":["7"],"editable":true}
 	]`
+	ratesJSON = `{"dataSource":"test","updateTime":1791226800,"baseCurrency":"UZS","exchangeRates":[
+		{"currency":"EUR","rate":"0.07576371721041024"},{"currency":"USD","rate":"0.0849008146233163"},
+		{"currency":"UZS","rate":"1"},{"currency":"BAD","rate":"oops"}]}`
 	templatesJSON = `[{"id":"55","name":"Coffee","templateType":1,"type":3,"categoryId":"201","sourceAccountId":"10","sourceAmount":350,"tagIds":[],"comment":"coffee"}]`
 )
 
@@ -100,6 +103,7 @@ func (fs *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		"/api/v1/transaction/tags/list.json":       tagsJSON,
 		"/api/v1/transaction/templates/list.json":  templatesJSON,
 		"/api/v1/transactions/list/all.json":       transactionsJSON,
+		"/api/v1/exchange_rates/latest.json":       ratesJSON,
 		"/api/v1/transactions/add.json":            `{"id":"999","type":3}`,
 		"/api/v1/transactions/modify.json":         `{"id":"1","type":3}`,
 		"/api/v1/transactions/delete.json":         `true`,
@@ -324,6 +328,54 @@ func TestPeriodStats(t *testing.T) {
 	spent, earned := api.TagTotals("7")
 	if spent.Get("USD") != 1750 || !earned.IsZero() {
 		t.Errorf("tag totals = %v / %v", spent, earned)
+	}
+	if api.ExchangeRates().IsEmpty() {
+		t.Error("UpdatePeriodStats should load exchange rates")
+	}
+}
+
+func TestNewApi_RatesFailureDoesNotBlockConnect(t *testing.T) {
+	fs, srv := newFakeServer(t)
+	fs.override["/api/v1/exchange_rates/latest.json"] = `{"success":false,"errorCode":500,"errorMessage":"boom"}`
+	api, err := NewApi(Config{ApiUrl: srv.URL, Token: "secret", TimeoutSeconds: 5})
+	if err != nil {
+		t.Fatalf("NewApi must succeed without rates: %v", err)
+	}
+	if !api.ExchangeRates().IsEmpty() {
+		t.Error("rates should be empty after a failed load")
+	}
+}
+
+func TestExchangeRates(t *testing.T) {
+	api, fs := newTestApi(t)
+	if api.ExchangeRates().IsEmpty() {
+		t.Fatal("NewApi should load exchange rates")
+	}
+	if err := api.UpdateExchangeRates(); err != nil {
+		t.Fatal(err)
+	}
+	rates := api.ExchangeRates()
+	if rates.Base != "UZS" || rates.Updated.Unix() != 1791226800 {
+		t.Errorf("rates = %+v", rates)
+	}
+	if got, ok := rates.Convert(10000, "EUR", "USD"); !ok || got != 11206 {
+		t.Errorf("EUR->USD = %d, %v", got, ok)
+	}
+	if _, ok := rates.Convert(100, "BAD", "USD"); ok {
+		t.Error("invalid rate must be skipped")
+	}
+
+	fs.mu.Lock()
+	fs.override["/api/v1/exchange_rates/latest.json"] = `{"success":false,"errorCode":500,"errorMessage":"boom"}`
+	fs.mu.Unlock()
+	if err := api.UpdateExchangeRates(); err == nil {
+		t.Error("expected error")
+	}
+	if api.ExchangeRates().IsEmpty() {
+		t.Error("cached rates must be kept on failure")
+	}
+	if err := api.UpdatePeriodStats(); err != nil {
+		t.Errorf("rate failure must not fail stats: %v", err)
 	}
 }
 

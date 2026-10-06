@@ -52,16 +52,19 @@ func (d summaryDelegate) Render(w io.Writer, m list.Model, _ int, listItem list.
 }
 
 type modelSummary struct {
-	list   list.Model
-	api    SummaryAPI
-	styles Styles
+	list      list.Model
+	api       SummaryAPI
+	styles    Styles
+	converted bool
+	warned    string // last missing-rate set we warned about
 }
 
 func newModelSummary(api SummaryAPI) modelSummary {
 	m := modelSummary{
-		list:   list.New([]list.Item{}, summaryDelegate{}, 0, 0),
-		api:    api,
-		styles: DefaultStyles(),
+		list:      list.New([]list.Item{}, summaryDelegate{}, 0, 0),
+		api:       api,
+		styles:    DefaultStyles(),
+		converted: true,
 	}
 	m.list.Title = "Summary"
 	m.list.SetShowStatusBar(false)
@@ -87,10 +90,11 @@ func (m modelSummary) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return StatsUpdatedMsg{}
 		}
+	case CurrencyModeMsg:
+		m.converted = msg.Converted
+		return m.rebuild()
 	case StatsUpdatedMsg, SummaryUpdateMsg:
-		items := summaryItems(m.api, m.styles)
-		m.list.SetWidth(summaryWidth(items))
-		return m, tea.Sequence(m.list.SetItems(items), tea.WindowSize())
+		return m.rebuild()
 	case UpdatePositions:
 		if msg.layout != nil {
 			_, v := m.styles.Base.GetFrameSize()
@@ -99,6 +103,25 @@ func (m modelSummary) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// rebuild recomputes the rows and warns once per new set of currencies
+// that have no exchange rate. No warning is shown while rates are not
+// loaded yet (startup, or the rates request failed).
+func (m modelSummary) rebuild() (tea.Model, tea.Cmd) {
+	items, missing := summaryItems(m.api, m.styles, m.converted)
+	m.list.SetWidth(summaryWidth(items))
+	cmds := []tea.Cmd{m.list.SetItems(items), tea.WindowSize()}
+	if m.api.ExchangeRates().IsEmpty() {
+		return m, tea.Sequence(cmds...)
+	}
+	if key := strings.Join(missing, ","); key != m.warned {
+		m.warned = key
+		if key != "" {
+			cmds = append(cmds, notify.NotifyWarn(missingRatesWarning(missing)))
+		}
+	}
+	return m, tea.Sequence(cmds...)
 }
 
 func (m modelSummary) View() string {
@@ -114,50 +137,96 @@ func summaryWidth(items []list.Item) int {
 	return width
 }
 
-func summaryItems(api SummaryAPI, styles Styles) []list.Item {
+// summaryItems builds the summary rows. In converted mode every total is shown
+// once in the default currency; amounts without an exchange rate follow as
+// per-currency rows and are returned as missing.
+func summaryItems(api SummaryAPI, styles Styles, convert bool) ([]list.Item, []string) {
 	primary := api.DefaultCurrency()
 	assets, liabilities := api.NetWorth()
-	income, expense := api.PeriodIncome(), api.PeriodExpense()
-
-	styled := func(v domain.Money) lipgloss.Style {
-		switch {
-		case v < 0:
-			return styles.Expense
-		case v > 0:
-			return styles.Income
-		}
-		return styles.Normal
-	}
-
-	items := []list.Item{}
 	netWorth := domain.Amounts{}
-	for c, v := range assets {
-		netWorth.Add(c, v)
+	for _, part := range []domain.Amounts{assets, liabilities} {
+		for c, v := range part {
+			netWorth.Add(c, v)
+		}
 	}
-	for c, v := range liabilities {
-		netWorth.Add(c, v)
-	}
-	for _, c := range netWorth.Currencies(primary) {
-		v := netWorth[c]
-		items = append(items, summaryItem{title: "Net worth " + c, value: v.String(), style: styled(v)})
+	income, expense := api.PeriodIncome(), api.PeriodExpense()
+	r := summaryRows{styles: styles, primary: primary}
+
+	if !convert {
+		items := r.netWorth(netWorth)
+		return append(items, r.period(income, expense, true)...), nil
 	}
 
+	nw := convertAmounts(netWorth, api)
+	in, out := convertAmounts(income, api), convertAmounts(expense, api)
+	balance := converted{total: in.total - out.total, left: missingAmounts(in, out), currency: in.currency}
+
+	items := []list.Item{summaryItem{title: "Net worth", value: nw.value(nw.total), style: r.signed(nw.total)}}
+	items = append(items, r.netWorth(nw.left)...)
+	items = append(items,
+		summaryItem{title: "Income", value: in.value(in.total), style: styles.Income},
+		summaryItem{title: "Expense", value: out.value(-out.total), style: styles.Expense},
+		summaryItem{title: "Balance", value: balance.value(balance.total), style: r.signed(balance.total)},
+	)
+	items = append(items, r.period(in.left, out.left, false)...)
+	return items, missingCurrencies(nw.left, in.left, out.left)
+}
+
+// missingAmounts merges the unconverted parts, used only to mark a total as partial.
+func missingAmounts(parts ...converted) domain.Amounts {
+	out := domain.Amounts{}
+	for _, p := range parts {
+		for c, v := range p.left {
+			out.Add(c, v)
+		}
+	}
+	return out
+}
+
+// summaryRows renders per-currency rows.
+type summaryRows struct {
+	styles  Styles
+	primary string
+}
+
+func (r summaryRows) signed(v domain.Money) lipgloss.Style {
+	switch {
+	case v < 0:
+		return r.styles.Expense
+	case v > 0:
+		return r.styles.Income
+	}
+	return r.styles.Normal
+}
+
+func (r summaryRows) netWorth(a domain.Amounts) []list.Item {
+	items := []list.Item{}
+	for _, c := range a.Currencies(r.primary) {
+		v := a[c]
+		items = append(items, summaryItem{title: "Net worth " + c, value: v.String(), style: r.signed(v)})
+	}
+	return items
+}
+
+// period renders Income/Expense/Balance per currency; showPrimary adds an
+// empty primary-currency block when there are no amounts at all.
+func (r summaryRows) period(income, expense domain.Amounts, showPrimary bool) []list.Item {
 	currencies := domain.Amounts{}
-	for c := range income {
-		currencies[c] = 0
+	for _, part := range []domain.Amounts{income, expense} {
+		for c := range part {
+			currencies[c] = 0
+		}
 	}
-	for c := range expense {
-		currencies[c] = 0
+	if showPrimary && len(currencies) == 0 && r.primary != "" {
+		currencies[r.primary] = 0
 	}
-	if len(currencies) == 0 && primary != "" {
-		currencies[primary] = 0
-	}
-	for _, c := range currencies.Currencies(primary) {
+	items := []list.Item{}
+	for _, c := range currencies.Currencies(r.primary) {
 		in, out := income[c], expense[c]
 		items = append(items,
-			summaryItem{title: "Income " + c, value: in.String(), style: styles.Income},
-			summaryItem{title: "Expense " + c, value: (-out).String(), style: styles.Expense},
-			summaryItem{title: "Balance " + c, value: (in - out).String(), style: styled(in - out)},
+			summaryItem{title: "Income " + c, value: in.String(), style: r.styles.Income},
+			summaryItem{title: "Expense " + c, value: (-out).String(), style: r.styles.Expense},
+			summaryItem{title: "Balance " + c, value: (in - out).String(), style: r.signed(in - out)},
 		)
 	}
 	return items

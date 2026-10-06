@@ -134,6 +134,7 @@ func initializeConfig(cmd *cobra.Command) error {
 	viper.SetEnvPrefix("EZBK_TUI")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	viper.AutomaticEnv()
+	viper.SetDefault("ui.convert_totals", true)
 
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)

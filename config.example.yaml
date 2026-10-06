@@ -8,3 +8,4 @@ logging:
   file: ""
 ui:
   full_view: false
+  convert_totals: true # summary/category totals in the default currency (toggle with "c")

@@ -108,6 +108,18 @@ type transactionWriteRequest struct {
 	Comment              string   `json:"comment"`
 }
 
+// latestExchangeRates is the result of exchange_rates/latest.json. Rate is the
+// amount of Currency per one unit of BaseCurrency, as a decimal string.
+type latestExchangeRates struct {
+	DataSource    string `json:"dataSource"`
+	UpdateTime    int64  `json:"updateTime"`
+	BaseCurrency  string `json:"baseCurrency"`
+	ExchangeRates []struct {
+		Currency string `json:"currency"`
+		Rate     string `json:"rate"`
+	} `json:"exchangeRates"`
+}
+
 type idRequest struct {
 	ID string `json:"id"`
 }
